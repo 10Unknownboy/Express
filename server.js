@@ -3,6 +3,13 @@ const cors = require("cors");
 
 const app = express();
 
+app.get("/health", (req, res) => {
+    res.json({
+        status: "ok",
+        message: "Server is running"
+    });
+});
+
 app.use(cors({
     origin: [
         "https://account-instagram-com.vercel.app",
