@@ -1,6 +1,11 @@
 const express = require("express");
+const cors = require("cors");
 
 const app = express();
+
+app.use(cors({
+    origin: "https://account-instagram-com.vercel.app"
+}));
 
 app.use(express.json());
 
