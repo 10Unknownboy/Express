@@ -131,7 +131,6 @@ app.post("/data", async (req, res) => {
 
 async function startAlert() {
 
-    // Don't make another call if one is already active
     if (alertState.active) {
 
         console.log(
@@ -160,12 +159,8 @@ async function startAlert() {
         );
 
         const call = await twilioClient.calls.create({
-
             to: ALERT_TO,
-
             from: TWILIO_FROM_NUMBER,
-
-            // Same URL as your working curl command
             url: "https://webhooks.twilio.com/v1/Voice/Template/voice_keyboard_input"
         });
 
@@ -176,6 +171,24 @@ async function startAlert() {
             `Call started: ${call.sid}`
         );
 
+        // --------------------------------------------------
+        // Automatically deactivate after 15 seconds
+        // --------------------------------------------------
+
+        setTimeout(() => {
+
+            // Make sure this is still the same call
+            if (alertState.callSid === call.sid) {
+
+                alertState.active = false;
+
+                console.log(
+                    `Alert ${call.sid} automatically deactivated after 15 seconds.`
+                );
+            }
+
+        }, 15000);
+
         return {
             started: true,
             callSid: call.sid
@@ -183,6 +196,7 @@ async function startAlert() {
 
     } catch (error) {
 
+        alertState.active = false;
         alertState.status = "call_failed";
         alertState.error = error.message;
 
